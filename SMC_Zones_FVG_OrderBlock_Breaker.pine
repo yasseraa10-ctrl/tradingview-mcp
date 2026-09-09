@@ -1,17 +1,24 @@
 // This source code is subject to the terms of the Mozilla Public License 2.0
-// © SMC Zones — FVG, Order Block & Breaker | Pine Script v6
+// © SMC Zones — FVG, Order Block & Breaker + Volume Profile | Pine Script v6
 // Educational use only — not financial advice. No Buy/Sell signals.
+//
+// ★ SPX / NDX NOTE:
+//   $SPX and $NDX have limited volume data on TradingView.
+//   For best Volume Profile results use: ES1! (S&P 500 futures) or NQ1! (Nasdaq futures).
+//   All SMC logic (BOS/CHoCH/OB/FVG/Breaker) works on any symbol including $SPX/$NDX.
 
 //@version=6
-indicator("SMC Zones — FVG, Order Block & Breaker", shorttitle="SMC Zones", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+indicator("SMC Zones — FVG, OB, Breaker + VP", shorttitle="SMC+VP", overlay=true,
+     max_boxes_count=500, max_lines_count=500, max_labels_count=500)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // A — SWING STRUCTURE
 // ══════════════════════════════════════════════════════════════════════════════
 grpA        = "A — Swing Structure"
-swingLength = input.int(5,    "Swing Length",    minval=2, maxval=20, group=grpA)
-showBOS     = input.bool(true, "Show BOS",       group=grpA)
-showCHoCH   = input.bool(true, "Show CHoCH",     group=grpA)
+swingLength = input.int(5,    "Swing Length",   minval=2, maxval=20, group=grpA,
+              tooltip="SPX/NDX tip: use 5–8 on 5m, 3–5 on 15m")
+showBOS     = input.bool(true, "Show BOS",      group=grpA)
+showCHoCH   = input.bool(true, "Show CHoCH",    group=grpA)
 colorBOS    = input.color(color.new(#2196F3, 0), "BOS Color",   group=grpA)
 colorCHoCH  = input.color(color.new(#FF5722, 0), "CHoCH Color", group=grpA)
 
@@ -19,7 +26,7 @@ colorCHoCH  = input.color(color.new(#FF5722, 0), "CHoCH Color", group=grpA)
 // B — DISPLACEMENT
 // ══════════════════════════════════════════════════════════════════════════════
 grpB      = "B — Displacement"
-displMode = input.string("ATR×1.25", "Mode", options=["ATR×1.25","Body×1.50 Avg"], group=grpB)
+displMode = input.string("ATR×1.25","Mode", options=["ATR×1.25","Body×1.50 Avg"], group=grpB)
 atrPeriod = input.int(14,   "ATR Period",      minval=5,   group=grpB)
 atrMult   = input.float(1.25,"ATR Multiplier", minval=0.5, step=0.05, group=grpB)
 bodyMult  = input.float(1.50,"Body Multiplier",minval=0.5, step=0.05, group=grpB)
@@ -28,67 +35,82 @@ bodyMult  = input.float(1.50,"Body Multiplier",minval=0.5, step=0.05, group=grpB
 // C — FAIR VALUE GAP
 // ══════════════════════════════════════════════════════════════════════════════
 grpC         = "C — Fair Value Gap"
-showFVG      = input.bool(true,   "Show FVG",          group=grpC)
-minFvgAtr    = input.float(0.10,  "Min FVG (× ATR)",   minval=0.01, step=0.01, group=grpC)
-fvgFillMode  = input.string("Touch","Fill on",         options=["Touch","50%","Full"], group=grpC)
-showIFVG     = input.bool(true,   "Show IFVG",         group=grpC)
+showFVG      = input.bool(true,  "Show FVG",        group=grpC)
+minFvgAtr    = input.float(0.10, "Min FVG (× ATR)", minval=0.01, step=0.01, group=grpC)
+fvgFillMode  = input.string("Touch","Fill on",      options=["Touch","50%","Full"], group=grpC)
+showIFVG     = input.bool(true,  "Show IFVG",       group=grpC)
 colorFVGBull = input.color(color.new(#00C853, 75), "Bull FVG", group=grpC)
 colorFVGBear = input.color(color.new(#D50000, 75), "Bear FVG", group=grpC)
 colorIFVG    = input.color(color.new(#AA00FF, 75), "IFVG",     group=grpC)
-maxFVG       = input.int(10, "Max FVG Zones", minval=1, maxval=50, group=grpC)
+maxFVG       = input.int(10,"Max FVG Zones", minval=1, maxval=50, group=grpC)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // D — ORDER BLOCK
 // ══════════════════════════════════════════════════════════════════════════════
 grpD        = "D — Order Block"
-showOB      = input.bool(true,       "Show OB",        group=grpD)
-obLookback  = input.int(12,          "Lookback Bars",  minval=3, maxval=50, group=grpD)
+showOB      = input.bool(true,        "Show OB",       group=grpD)
+obLookback  = input.int(12,           "Lookback Bars", minval=3, maxval=50, group=grpD)
 obSource    = input.string("Full Range","OB Source",   options=["Full Range","Body Only"], group=grpD)
-maxOB       = input.int(8,           "Max OB Zones",   minval=1, maxval=20, group=grpD)
+maxOB       = input.int(8,            "Max OB Zones",  minval=1, maxval=20, group=grpD)
 colorOBBull = input.color(color.new(#1565C0, 70), "Bull OB", group=grpD)
 colorOBBear = input.color(color.new(#B71C1C, 70), "Bear OB", group=grpD)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // E — BREAKER BLOCK
 // ══════════════════════════════════════════════════════════════════════════════
-grpE       = "E — Breaker Block"
-showBB     = input.bool(true, "Show Breakers",          group=grpE)
-colorBBBull= input.color(color.new(#FF6F00, 70), "Bull Breaker", group=grpE)
-colorBBBear= input.color(color.new(#6A1B9A, 70), "Bear Breaker", group=grpE)
-showBBRe   = input.bool(true, "Highlight Retest",       group=grpE)
+grpE        = "E — Breaker Block"
+showBB      = input.bool(true, "Show Breakers",   group=grpE)
+colorBBBull = input.color(color.new(#FF6F00, 70), "Bull Breaker", group=grpE)
+colorBBBear = input.color(color.new(#6A1B9A, 70), "Bear Breaker", group=grpE)
+showBBRe    = input.bool(true, "Highlight Retest",group=grpE)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // F — DISPLAY
 // ══════════════════════════════════════════════════════════════════════════════
 grpF            = "F — Display"
-zoneBorderWidth = input.int(1,        "Border Width",   minval=1, maxval=3, group=grpF)
-extendZones     = input.bool(true,    "Extend Zones",   group=grpF)
-labelSize       = input.string("small","Label Size",    options=["tiny","small","normal","large"], group=grpF)
+zoneBorderWidth = input.int(1,       "Border Width", minval=1, maxval=3, group=grpF)
+extendZones     = input.bool(true,   "Extend Zones", group=grpF)
+labelSize       = input.string("small","Label Size", options=["tiny","small","normal","large"], group=grpF)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // G — ALERTS
 // ══════════════════════════════════════════════════════════════════════════════
 grpG         = "G — Alerts"
-alertOnBOS   = input.bool(true, "Alert: BOS",   group=grpG)
-alertOnCHoCH = input.bool(true, "Alert: CHoCH", group=grpG)
-alertOnFVG   = input.bool(true, "Alert: FVG",   group=grpG)
-alertOnOB    = input.bool(true, "Alert: OB",    group=grpG)
-alertOnBB    = input.bool(true, "Alert: BB",    group=grpG)
-alertOnIFVG  = input.bool(true, "Alert: IFVG",  group=grpG)
-alertOnEntry = input.bool(true, "Alert: Entry Setup", group=grpG)
+alertOnBOS   = input.bool(true, "Alert: BOS",         group=grpG)
+alertOnCHoCH = input.bool(true, "Alert: CHoCH",       group=grpG)
+alertOnFVG   = input.bool(true, "Alert: FVG",         group=grpG)
+alertOnOB    = input.bool(true, "Alert: OB",          group=grpG)
+alertOnBB    = input.bool(true, "Alert: BB",          group=grpG)
+alertOnIFVG  = input.bool(true, "Alert: IFVG",        group=grpG)
+alertOnEntry = input.bool(true, "Alert: Entry Setup",  group=grpG)
 
 // ══════════════════════════════════════════════════════════════════════════════
-// H — ENTRY SETUP (NEW)
+// H — ENTRY SETUP
 // ══════════════════════════════════════════════════════════════════════════════
-grpH         = "H — Entry Setup"
-showEntry    = input.bool(true,  "Show Entry Setups",    group=grpH)
-htfTF        = input.timeframe("60", "HTF Bias TF",      group=grpH,
-                 tooltip="Higher TF for trend direction filter.\nExamples: 1m chart → '15', 5m chart → '60', 15m chart → '240'")
-htfEmaLen    = input.int(50,    "HTF EMA Length",        minval=10, group=grpH)
-confType     = input.string("Both", "Confirmation Type", options=["Engulfing","Pin Bar","Both"], group=grpH)
-showSLLine   = input.bool(true,  "Show SL Level Line",   group=grpH)
-colorSetupL  = input.color(color.new(#00E676, 0), "Setup Long Color",  group=grpH)
-colorSetupS  = input.color(color.new(#FF1744, 0), "Setup Short Color", group=grpH)
+grpH        = "H — Entry Setup"
+showEntry   = input.bool(true,  "Show Entry Setups",  group=grpH)
+htfTF       = input.timeframe("60","HTF Bias TF",     group=grpH,
+              tooltip="1m chart→'5'  |  5m chart→'60'  |  15m chart→'240'  |  1H chart→'D'")
+htfEmaLen   = input.int(50,    "HTF EMA Length",      minval=10, group=grpH)
+confType    = input.string("Both","Confirmation",     options=["Engulfing","Pin Bar","Both"], group=grpH)
+showSLLine  = input.bool(true, "Show SL Level Line",  group=grpH)
+colorSetupL = input.color(color.new(#00E676, 0), "Setup Long Color",  group=grpH)
+colorSetupS = input.color(color.new(#FF1744, 0), "Setup Short Color", group=grpH)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// I — VOLUME PROFILE  ★ NEW
+// ══════════════════════════════════════════════════════════════════════════════
+grpI        = "I — Volume Profile"
+showVP      = input.bool(true,  "Show VP Levels (POC / VA)",  group=grpI,
+              tooltip="⚠ SPX/NDX: volume data is limited on $SPX/$NDX.\nFor accurate VP use ES1! or NQ1! instead.")
+vpLookback  = input.int(50,     "VP Lookback Bars",  minval=10, maxval=300, group=grpI,
+              tooltip="How many past bars the profile is built from")
+vpBuckets   = input.int(24,     "VP Price Buckets",  minval=10, maxval=50,  group=grpI)
+useVPFilter = input.bool(true,  "VP Filter on Entry", group=grpI,
+              tooltip="Long setup only when price ≤ POC (discount zone)\nShort setup only when price ≥ POC (premium zone)")
+colorPOC    = input.color(color.new(#FFEB3B, 0),  "POC Line Color",        group=grpI)
+colorVAH    = input.color(color.new(#B0BEC5, 70), "Value Area Color",      group=grpI)
+showVABox   = input.bool(true,  "Show Value Area Box",         group=grpI)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // CORE CALCULATIONS
@@ -107,9 +129,9 @@ swingLow  = ta.pivotlow(low,  swingLength, swingLength)
 
 var float lastSwingH  = na
 var float lastSwingL  = na
-var float lastBrokenH = na   // consumed levels — prevent BOS refire
+var float lastBrokenH = na
 var float lastBrokenL = na
-var int   trendBias   = 0    // 1=bull, -1=bear, 0=init
+var int   trendBias   = 0
 
 if not na(swingHigh)
     lastSwingH := swingHigh
@@ -128,55 +150,128 @@ var bool bosBull   = false
 var bool bosBear   = false
 var bool chochBull = false
 var bool chochBear = false
-bosBull   := false
-bosBear   := false
-chochBull := false
-chochBear := false
+bosBull := false ; bosBear := false ; chochBull := false ; chochBear := false
 
 if barstate.isconfirmed
     if trendBias == 0
         if not na(lastSwingH) and close > lastSwingH
-            trendBias := 1
-            lastBrokenH := lastSwingH
+            trendBias := 1 ; lastBrokenH := lastSwingH
         else if not na(lastSwingL) and close < lastSwingL
-            trendBias := -1
-            lastBrokenL := lastSwingL
+            trendBias := -1 ; lastBrokenL := lastSwingL
     else if not na(lastSwingH) and close > lastSwingH and lastSwingH != lastBrokenH
         if trendBias == 1
             bosBull := true
         else
-            chochBull := true
-            trendBias := 1
+            chochBull := true ; trendBias := 1
         lastBrokenH := lastSwingH
     else if not na(lastSwingL) and close < lastSwingL and lastSwingL != lastBrokenL
         if trendBias == -1
             bosBear := true
         else
-            chochBear := true
-            trendBias := -1
+            chochBear := true ; trendBias := -1
         lastBrokenL := lastSwingL
 
 if showBOS and bosBull
-    label.new(bar_index, high, "BOS↑", style=label.style_label_up,
-         color=colorBOS, textcolor=color.white, size=_lblSize)
+    label.new(bar_index, high, "BOS↑", style=label.style_label_up,   color=colorBOS,   textcolor=color.white, size=_lblSize)
 if showBOS and bosBear
-    label.new(bar_index, low,  "BOS↓", style=label.style_label_down,
-         color=colorBOS, textcolor=color.white, size=_lblSize)
+    label.new(bar_index, low,  "BOS↓", style=label.style_label_down, color=colorBOS,   textcolor=color.white, size=_lblSize)
 if showCHoCH and chochBull
-    label.new(bar_index, high, "CHoCH↑", style=label.style_label_up,
-         color=colorCHoCH, textcolor=color.white, size=_lblSize)
+    label.new(bar_index, high, "CHoCH↑", style=label.style_label_up,   color=colorCHoCH, textcolor=color.white, size=_lblSize)
 if showCHoCH and chochBear
-    label.new(bar_index, low,  "CHoCH↓", style=label.style_label_down,
-         color=colorCHoCH, textcolor=color.white, size=_lblSize)
+    label.new(bar_index, low,  "CHoCH↓", style=label.style_label_down, color=colorCHoCH, textcolor=color.white, size=_lblSize)
 
-// ══════════════════════════════════════════════════════════════════════════════
-// HTF BIAS (Section H helper)
-// Uses EMA on the higher timeframe — non-repainting (lookahead off by default)
-// ══════════════════════════════════════════════════════════════════════════════
+// ── HTF Bias ─────────────────────────────────────────────────────────────────
 htfClose = request.security(syminfo.tickerid, htfTF, close[1], lookahead=barmerge.lookahead_off)
 htfEma   = request.security(syminfo.tickerid, htfTF, ta.ema(close, htfEmaLen)[1], lookahead=barmerge.lookahead_off)
 htfBull  = htfClose > htfEma
 htfBear  = htfClose < htfEma
+
+bgcolor(htfBull ? color.new(#00C853, 97) : htfBear ? color.new(#D50000, 97) : na, title="HTF Bias Bg")
+
+// ══════════════════════════════════════════════════════════════════════════════
+// VOLUME PROFILE CALCULATION  ★ NEW
+// Builds a rolling Volume Profile over the last vpLookback bars.
+// Finds POC (max-volume price) and Value Area (70% of total volume).
+// ══════════════════════════════════════════════════════════════════════════════
+var float pocLevel = na
+var float vahLevel = na
+var float valLevel = na
+var line  pocLine  = na
+var label pocLbl   = na
+var box   vaBox_   = na
+
+if barstate.isconfirmed and showVP
+    rHigh = ta.highest(high, vpLookback)
+    rLow  = ta.lowest(low,  vpLookback)
+    bSize = (rHigh - rLow) / vpBuckets
+
+    if bSize > 0.0
+        // Build volume buckets
+        vols = array.new<float>(vpBuckets, 0.0)
+        for i = 0 to vpLookback - 1
+            // Distribute bar volume across all price buckets the bar touched
+            barH  = high[i]
+            barL  = low[i]
+            barV  = volume[i]
+            // Fraction of bar range in each bucket proportional to overlap
+            for k = 0 to vpBuckets - 1
+                bucketLo = rLow + k * bSize
+                bucketHi = bucketLo + bSize
+                overlap  = math.min(barH, bucketHi) - math.max(barL, bucketLo)
+                if overlap > 0.0
+                    barRange = math.max(barH - barL, bSize * 0.001)  // avoid div/0
+                    array.set(vols, k, array.get(vols, k) + barV * overlap / barRange)
+
+        // POC — bucket with highest volume
+        maxV   = array.max(vols)
+        pocIdx = array.indexof(vols, maxV)
+        pocLevel := rLow + (pocIdx + 0.5) * bSize
+
+        // Value Area — expand outward from POC until 70% of total volume covered
+        totalV  = array.sum(vols)
+        vaTarget = totalV * 0.70
+        vaVol   = maxV
+        lo_k    = pocIdx
+        hi_k    = pocIdx
+        maxIter = vpBuckets * 2
+        iter    = 0
+        while vaVol < vaTarget and iter < maxIter
+            loV = lo_k > 0              ? array.get(vols, lo_k - 1) : 0.0
+            hiV = hi_k < vpBuckets - 1 ? array.get(vols, hi_k + 1) : 0.0
+            if loV == 0.0 and hiV == 0.0
+                break
+            if loV >= hiV and lo_k > 0
+                lo_k -= 1 ; vaVol += loV
+            else if hi_k < vpBuckets - 1
+                hi_k += 1 ; vaVol += hiV
+            else if lo_k > 0
+                lo_k -= 1 ; vaVol += loV
+            else
+                break
+            iter += 1
+
+        vahLevel := rLow + (hi_k + 1) * bSize
+        valLevel := rLow + lo_k * bSize
+
+        // Draw POC line (replace previous)
+        if not na(pocLine)
+            line.delete(pocLine)
+        pocLine := line.new(bar_index - vpLookback, pocLevel, bar_index + 15, pocLevel,
+             color=colorPOC, style=line.style_solid, width=2)
+
+        // POC label (replace previous)
+        if not na(pocLbl)
+            label.delete(pocLbl)
+        pocLbl := label.new(bar_index + 2, pocLevel, "POC",
+             style=label.style_label_left, color=colorPOC,
+             textcolor=color.black, size=size.tiny)
+
+        // Value Area box
+        if showVABox
+            if not na(vaBox_)
+                box.delete(vaBox_)
+            vaBox_ := box.new(bar_index - vpLookback, vahLevel, bar_index + 15, valLevel,
+                 border_color=color.new(#B0BEC5, 50), bgcolor=colorVAH, border_width=1)
 
 // ══════════════════════════════════════════════════════════════════════════════
 // FAIR VALUE GAPS
@@ -189,35 +284,32 @@ var array<box>   fvgBoxes  = array.new<box>()
 
 var bool newFVGBull = false
 var bool newFVGBear = false
-newFVGBull := false
-newFVGBear := false
+newFVGBull := false ; newFVGBear := false
 
 if barstate.isconfirmed and showFVG
     szBull = low   - high[2]
     szBear = low[2] - high
-    rEdge  = extendZones ? bar_index + 50 : bar_index + 10
+    rE     = extendZones ? bar_index + 50 : bar_index + 10
 
     if szBull > minFvgAtr * atrVal
         newFVGBull := true
-        b = box.new(bar_index - 2, low, rEdge, high[2],
+        b = box.new(bar_index - 2, low, rE, high[2],
              border_color=colorFVGBull, bgcolor=colorFVGBull, border_width=zoneBorderWidth)
         array.push(fvgTop, low) ; array.push(fvgBot, high[2])
         array.push(fvgIsBull, true) ; array.push(fvgActive, true) ; array.push(fvgBoxes, b)
         if array.size(fvgTop) > maxFVG
             box.delete(array.shift(fvgBoxes))
-            array.shift(fvgTop) ; array.shift(fvgBot)
-            array.shift(fvgIsBull) ; array.shift(fvgActive)
+            array.shift(fvgTop) ; array.shift(fvgBot) ; array.shift(fvgIsBull) ; array.shift(fvgActive)
 
     if szBear > minFvgAtr * atrVal
         newFVGBear := true
-        b = box.new(bar_index - 2, low[2], rEdge, high,
+        b = box.new(bar_index - 2, low[2], rE, high,
              border_color=colorFVGBear, bgcolor=colorFVGBear, border_width=zoneBorderWidth)
         array.push(fvgTop, low[2]) ; array.push(fvgBot, high)
         array.push(fvgIsBull, false) ; array.push(fvgActive, true) ; array.push(fvgBoxes, b)
         if array.size(fvgTop) > maxFVG
             box.delete(array.shift(fvgBoxes))
-            array.shift(fvgTop) ; array.shift(fvgBot)
-            array.shift(fvgIsBull) ; array.shift(fvgActive)
+            array.shift(fvgTop) ; array.shift(fvgBot) ; array.shift(fvgIsBull) ; array.shift(fvgActive)
 
 var bool ifvgCreated = false
 ifvgCreated := false
@@ -225,9 +317,7 @@ ifvgCreated := false
 if barstate.isconfirmed and array.size(fvgTop) > 0
     for i = array.size(fvgTop) - 1 to 0
         if array.get(fvgActive, i)
-            t    = array.get(fvgTop, i)
-            b    = array.get(fvgBot, i)
-            mid  = (t + b) / 2.0
+            t = array.get(fvgTop, i) ; b = array.get(fvgBot, i) ; mid = (t + b) / 2.0
             bull = array.get(fvgIsBull, i)
             filled = switch fvgFillMode
                 "Touch" => bull ? low <= t   : high >= b
@@ -239,8 +329,7 @@ if barstate.isconfirmed and array.size(fvgTop) > 0
                 bx = array.get(fvgBoxes, i)
                 if showIFVG
                     ifvgCreated := true
-                    box.set_bgcolor(bx, colorIFVG)
-                    box.set_border_color(bx, colorIFVG)
+                    box.set_bgcolor(bx, colorIFVG) ; box.set_border_color(bx, colorIFVG)
                 else
                     box.delete(bx)
             else if extendZones
@@ -259,18 +348,15 @@ var array<bool>  obConverted = array.new<bool>()
 
 var bool newOBBull = false
 var bool newOBBear = false
-newOBBull := false
-newOBBear := false
+newOBBull := false ; newOBBear := false
 
 findOB(isBull, lb) =>
     idx = -1
     for j = 1 to lb
         if isBull
-            if close[j] < open[j]
-                idx := j ; break
+            if close[j] < open[j] then idx := j ; break
         else
-            if close[j] > open[j]
-                idx := j ; break
+            if close[j] > open[j] then idx := j ; break
     idx
 
 addOB(isBull, oIdx) =>
@@ -294,14 +380,10 @@ addOB(isBull, oIdx) =>
 if barstate.isconfirmed and showOB and isDisplacement
     if bosBull or chochBull
         i = findOB(true, obLookback)
-        if i >= 0
-            newOBBull := true
-            addOB(true, i)
+        if i >= 0 then newOBBull := true ; addOB(true, i)
     if bosBear or chochBear
         i = findOB(false, obLookback)
-        if i >= 0
-            newOBBear := true
-            addOB(false, i)
+        if i >= 0 then newOBBear := true ; addOB(false, i)
 
 if barstate.isconfirmed and array.size(obTop) > 0
     for i = array.size(obTop) - 1 to 0
@@ -311,8 +393,7 @@ if barstate.isconfirmed and array.size(obTop) > 0
             if broken
                 array.set(obActive, i, false)
                 box.delete(array.get(obBoxes, i))
-                if not array.get(obConverted, i)
-                    array.set(obConverted, i, true)
+                if not array.get(obConverted, i) then array.set(obConverted, i, true)
             else if extendZones
                 box.set_right(array.get(obBoxes, i), bar_index + 50)
 
@@ -331,13 +412,13 @@ newBB := false
 if barstate.isconfirmed and showBB and array.size(obTop) > 0
     for i = array.size(obTop) - 1 to 0
         if array.get(obConverted, i) and not array.get(obActive, i)
-            bbB   = not array.get(obIsBull, i)
-            t     = array.get(obTop, i) ; b = array.get(obBot, i)
-            lft   = array.get(obLeft, i)
-            clr   = bbB ? colorBBBull : colorBBBear
-            rE    = extendZones ? bar_index + 50 : bar_index + 10
-            bx    = box.new(lft, t, rE, b, border_color=clr, bgcolor=clr,
-                     border_width=zoneBorderWidth, border_style=line.style_dashed)
+            bbB  = not array.get(obIsBull, i)
+            t    = array.get(obTop, i) ; b = array.get(obBot, i)
+            lft  = array.get(obLeft, i)
+            clr  = bbB ? colorBBBull : colorBBBear
+            rE   = extendZones ? bar_index + 50 : bar_index + 10
+            bx   = box.new(lft, t, rE, b, border_color=clr, bgcolor=clr,
+                    border_width=zoneBorderWidth, border_style=line.style_dashed)
             label.new(lft, bbB ? b : t, bbB ? "Bull Breaker" : "Bear Breaker",
                  style=bbB ? label.style_label_up : label.style_label_down,
                  color=clr, textcolor=color.white, size=_lblSize)
@@ -347,47 +428,34 @@ if barstate.isconfirmed and showBB and array.size(obTop) > 0
             array.set(obConverted, i, false)
             if array.size(bbTop) > maxOB
                 box.delete(array.shift(bbBoxes))
-                array.shift(bbTop) ; array.shift(bbBot)
-                array.shift(bbIsBull) ; array.shift(bbActive)
-
-var bool bbRetestBull = false
-var bool bbRetestBear = false
-bbRetestBull := false
-bbRetestBear := false
+                array.shift(bbTop) ; array.shift(bbBot) ; array.shift(bbIsBull) ; array.shift(bbActive)
 
 if barstate.isconfirmed and showBBRe and array.size(bbTop) > 0
     for i = array.size(bbTop) - 1 to 0
         if array.get(bbActive, i)
-            t = array.get(bbTop, i) ; b = array.get(bbBot, i)
-            bull = array.get(bbIsBull, i)
-            if close >= b and close <= t
-                if bull then bbRetestBull := true else bbRetestBear := true
+            t = array.get(bbTop, i) ; b = array.get(bbBot, i) ; bull = array.get(bbIsBull, i)
             if (bull and close < b) or (not bull and close > t)
-                array.set(bbActive, i, false)
-                box.delete(array.get(bbBoxes, i))
+                array.set(bbActive, i, false) ; box.delete(array.get(bbBoxes, i))
             else if extendZones
                 box.set_right(array.get(bbBoxes, i), bar_index + 50)
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ENTRY SETUP LOGIC (Section H)
-// Conditions: price inside active zone + HTF bias aligned + confirmation candle
+// ENTRY SETUP — Section H + VP Filter
+// 4 conditions must all pass:
+//   1. Active zone (OB / FVG / Breaker)
+//   2. HTF bias aligned
+//   3. Confirmation candle
+//   4. VP: price in discount (≤ POC) for long, premium (≥ POC) for short
 // ══════════════════════════════════════════════════════════════════════════════
+bodyH  = math.abs(close - open)
+lWick  = math.min(close, open) - low
+uWick  = high - math.max(close, open)
+rng    = high - low
 
-// ── Confirmation candle patterns ────────────────────────────────────────────
-bodyH    = math.abs(close - open)
-lWick    = math.min(close, open) - low
-uWick    = high - math.max(close, open)
-range_   = high - low
-
-// Bullish engulfing: current bar is bullish and fully engulfs prior bearish bar
-bullEngulf = close > open and open[1] > close[1] and close > open[1] and open < close[1]
-// Bearish engulfing
-bearEngulf = close < open and open[1] < close[1] and close < open[1] and open > close[1]
-
-// Hammer: lower wick ≥ 2× body, upper wick ≤ body, bullish close preferred
-hammer       = lWick >= 2.0 * bodyH and uWick <= bodyH and range_ > 0
-// Shooting star: upper wick ≥ 2× body, lower wick ≤ body
-shootingStar = uWick >= 2.0 * bodyH and lWick <= bodyH and range_ > 0
+bullEngulf   = close > open and open[1] > close[1] and close > open[1] and open < close[1]
+bearEngulf   = close < open and open[1] < close[1] and close < open[1] and open > close[1]
+hammer       = lWick >= 2.0 * bodyH and uWick <= bodyH and rng > 0
+shootingStar = uWick >= 2.0 * bodyH and lWick <= bodyH and rng > 0
 
 bullConf = switch confType
     "Engulfing" => bullEngulf
@@ -401,19 +469,14 @@ bearConf = switch confType
     "Both"      => bearEngulf or shootingStar
     => false
 
-// ── Zone membership check ────────────────────────────────────────────────────
-// Price must have entered (touched) the zone this bar
-var bool inBullZone  = false
-var bool inBearZone  = false
-var float bullZoneSL = na   // bottom of the bull zone for SL
-var float bearZoneSL = na   // top  of the bear zone for SL
-inBullZone  := false
-inBearZone  := false
-bullZoneSL  := na
-bearZoneSL  := na
+var bool  inBullZone = false
+var bool  inBearZone = false
+var float bullZoneSL = na
+var float bearZoneSL = na
+inBullZone := false ; inBearZone := false
+bullZoneSL := na    ; bearZoneSL := na
 
 if barstate.isconfirmed
-    // Check OBs
     if array.size(obTop) > 0
         for i = 0 to array.size(obTop) - 1
             if array.get(obActive, i)
@@ -424,7 +487,6 @@ if barstate.isconfirmed
                 if not array.get(obIsBull, i) and high >= b and close <= t
                     inBearZone := true
                     bearZoneSL := na(bearZoneSL) ? t : math.max(bearZoneSL, t)
-    // Check FVGs
     if array.size(fvgTop) > 0
         for i = 0 to array.size(fvgTop) - 1
             if array.get(fvgActive, i)
@@ -435,7 +497,6 @@ if barstate.isconfirmed
                 if not array.get(fvgIsBull, i) and high >= b and close <= t
                     inBearZone := true
                     bearZoneSL := na(bearZoneSL) ? t : math.max(bearZoneSL, t)
-    // Check Breakers
     if array.size(bbTop) > 0
         for i = 0 to array.size(bbTop) - 1
             if array.get(bbActive, i)
@@ -447,33 +508,30 @@ if barstate.isconfirmed
                     inBearZone := true
                     bearZoneSL := na(bearZoneSL) ? t : math.max(bearZoneSL, t)
 
-// ── Entry signals ────────────────────────────────────────────────────────────
-// All 3 conditions must be met: zone + HTF bias + confirmation candle
-setupLong  = barstate.isconfirmed and showEntry and inBullZone and htfBull and bullConf
-setupShort = barstate.isconfirmed and showEntry and inBearZone and htfBear and bearConf
+// VP discount/premium filter
+vpLongOK  = not useVPFilter or (not na(pocLevel) and close <= pocLevel)
+vpShortOK = not useVPFilter or (not na(pocLevel) and close >= pocLevel)
+
+// Final entry conditions (4 filters)
+setupLong  = barstate.isconfirmed and showEntry and inBullZone and htfBull and bullConf and vpLongOK
+setupShort = barstate.isconfirmed and showEntry and inBearZone and htfBear and bearConf and vpShortOK
 
 if setupLong
     label.new(bar_index, low,  "⚡ Setup Long",
-         style=label.style_label_up, color=colorSetupL,
-         textcolor=color.black, size=size.normal)
+         style=label.style_label_up,   color=colorSetupL, textcolor=color.black, size=size.normal)
     if showSLLine and not na(bullZoneSL)
         line.new(bar_index - 3, bullZoneSL, bar_index + 10, bullZoneSL,
              color=color.new(colorSetupL, 30), style=line.style_dashed, width=1)
 
 if setupShort
     label.new(bar_index, high, "⚡ Setup Short",
-         style=label.style_label_down, color=colorSetupS,
-         textcolor=color.white, size=size.normal)
+         style=label.style_label_down, color=colorSetupS, textcolor=color.white, size=size.normal)
     if showSLLine and not na(bearZoneSL)
         line.new(bar_index - 3, bearZoneSL, bar_index + 10, bearZoneSL,
              color=color.new(colorSetupS, 30), style=line.style_dashed, width=1)
 
-// ── HTF bias bar color (subtle background) ───────────────────────────────────
-bgcolor(htfBull ? color.new(#00C853, 97) : htfBear ? color.new(#D50000, 97) : na,
-     title="HTF Bias Background")
-
 // ══════════════════════════════════════════════════════════════════════════════
-// PLOTS — Swing markers
+// PLOTS
 // ══════════════════════════════════════════════════════════════════════════════
 plotshape(not na(swingHigh) ? swingHigh : na, "SH", shape.triangledown,
      location.abovebar, color.new(#FF5722, 40), size=size.tiny)
@@ -481,17 +539,17 @@ plotshape(not na(swingLow)  ? swingLow  : na, "SL", shape.triangleup,
      location.belowbar, color.new(#2196F3, 40), size=size.tiny)
 
 // ══════════════════════════════════════════════════════════════════════════════
-// ALERT CONDITIONS (12 total)
+// ALERT CONDITIONS (12)
 // ══════════════════════════════════════════════════════════════════════════════
-alertcondition(alertOnBOS   and bosBull,    "BOS Bullish",     "BOS↑ Break of Structure")
-alertcondition(alertOnBOS   and bosBear,    "BOS Bearish",     "BOS↓ Break of Structure")
-alertcondition(alertOnCHoCH and chochBull,  "CHoCH Bullish",   "CHoCH↑ Change of Character")
-alertcondition(alertOnCHoCH and chochBear,  "CHoCH Bearish",   "CHoCH↓ Change of Character")
-alertcondition(alertOnFVG   and newFVGBull, "New Bull FVG",    "Bullish FVG detected")
-alertcondition(alertOnFVG   and newFVGBear, "New Bear FVG",    "Bearish FVG detected")
-alertcondition(alertOnIFVG  and ifvgCreated,"FVG → IFVG",      "FVG converted to IFVG")
-alertcondition(alertOnOB    and newOBBull,  "New Bull OB",     "Bullish Order Block")
-alertcondition(alertOnOB    and newOBBear,  "New Bear OB",     "Bearish Order Block")
-alertcondition(alertOnBB    and newBB,      "New Breaker",     "Breaker Block formed")
-alertcondition(alertOnEntry and setupLong,  "Entry Setup Long","⚡ Long setup: zone + HTF bull + confirmation")
-alertcondition(alertOnEntry and setupShort, "Entry Setup Short","⚡ Short setup: zone + HTF bear + confirmation")
+alertcondition(alertOnBOS   and bosBull,    "BOS Bullish",      "BOS↑")
+alertcondition(alertOnBOS   and bosBear,    "BOS Bearish",      "BOS↓")
+alertcondition(alertOnCHoCH and chochBull,  "CHoCH Bullish",    "CHoCH↑")
+alertcondition(alertOnCHoCH and chochBear,  "CHoCH Bearish",    "CHoCH↓")
+alertcondition(alertOnFVG   and newFVGBull, "New Bull FVG",     "Bullish FVG")
+alertcondition(alertOnFVG   and newFVGBear, "New Bear FVG",     "Bearish FVG")
+alertcondition(alertOnIFVG  and ifvgCreated,"FVG → IFVG",       "IFVG formed")
+alertcondition(alertOnOB    and newOBBull,  "New Bull OB",      "Bullish OB")
+alertcondition(alertOnOB    and newOBBear,  "New Bear OB",      "Bearish OB")
+alertcondition(alertOnBB    and newBB,      "New Breaker",      "Breaker Block")
+alertcondition(alertOnEntry and setupLong,  "Entry Setup Long", "⚡ Long: zone + HTF + candle + VP discount")
+alertcondition(alertOnEntry and setupShort, "Entry Setup Short","⚡ Short: zone + HTF + candle + VP premium")
