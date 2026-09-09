@@ -1,0 +1,493 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// © SMC Zones — FVG, Order Block & Breaker | Pine Script v6
+// Educational use only — not financial advice. No Buy/Sell signals.
+
+//@version=6
+indicator("SMC Zones — FVG, Order Block & Breaker", shorttitle="SMC Zones", overlay=true, max_boxes_count=500, max_lines_count=500, max_labels_count=500)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECTION A — SWING STRUCTURE INPUTS
+// ══════════════════════════════════════════════════════════════════════════════
+grpA = "A — Swing Structure"
+swingLength   = input.int(5,   "Swing Length (Pivot lookback)",  minval=2, maxval=20, group=grpA)
+showBOS       = input.bool(true, "Show BOS Labels",              group=grpA)
+showCHoCH     = input.bool(true, "Show CHoCH Labels",            group=grpA)
+colorBOS      = input.color(color.new(#2196F3, 0), "BOS Color",  group=grpA)
+colorCHoCH    = input.color(color.new(#FF5722, 0), "CHoCH Color",group=grpA)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECTION B — DISPLACEMENT INPUTS
+// ══════════════════════════════════════════════════════════════════════════════
+grpB = "B — Displacement"
+displMode     = input.string("ATR×1.25", "Displacement Mode", options=["ATR×1.25","Body×1.50 Avg"], group=grpB)
+atrPeriod     = input.int(14, "ATR Period", minval=5, group=grpB)
+atrMult       = input.float(1.25, "ATR Multiplier", minval=0.5, step=0.05, group=grpB)
+bodyMult      = input.float(1.50, "Body Multiplier (vs 20-bar avg)", minval=0.5, step=0.05, group=grpB)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECTION C — FVG INPUTS
+// ══════════════════════════════════════════════════════════════════════════════
+grpC = "C — Fair Value Gap"
+showFVG       = input.bool(true, "Show FVG Zones",              group=grpC)
+minFvgAtr     = input.float(0.10, "Min FVG Size (× ATR)",       minval=0.01, step=0.01, group=grpC)
+fvgFillMode   = input.string("Touch", "Fill / Invalidate on",   options=["Touch","50%","Full"], group=grpC)
+showIFVG      = input.bool(true, "Show IFVG (Inverse FVG)",     group=grpC)
+colorFVGBull  = input.color(color.new(#00C853, 75), "Bullish FVG",  group=grpC)
+colorFVGBear  = input.color(color.new(#D50000, 75), "Bearish FVG",  group=grpC)
+colorIFVG     = input.color(color.new(#AA00FF, 75), "IFVG",         group=grpC)
+maxFVG        = input.int(10, "Max FVG Zones on Chart", minval=1, maxval=50, group=grpC)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECTION D — ORDER BLOCK INPUTS
+// ══════════════════════════════════════════════════════════════════════════════
+grpD = "D — Order Block"
+showOB        = input.bool(true,  "Show Order Blocks",           group=grpD)
+obLookback    = input.int(12,     "OB Lookback Bars",            minval=3, maxval=50, group=grpD)
+obSource      = input.string("Full Range", "OB Source",          options=["Full Range","Body Only"], group=grpD)
+maxOB         = input.int(8,      "Max OB Zones Per Side",       minval=1, maxval=20, group=grpD)
+colorOBBull   = input.color(color.new(#1565C0, 70), "Bullish OB", group=grpD)
+colorOBBear   = input.color(color.new(#B71C1C, 70), "Bearish OB", group=grpD)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECTION E — BREAKER BLOCK INPUTS
+// ══════════════════════════════════════════════════════════════════════════════
+grpE = "E — Breaker Block"
+showBB        = input.bool(true,  "Show Breaker Blocks",         group=grpE)
+colorBBBull   = input.color(color.new(#FF6F00, 70), "Bullish Breaker", group=grpE)
+colorBBBear   = input.color(color.new(#6A1B9A, 70), "Bearish Breaker", group=grpE)
+showBBRetest  = input.bool(true,  "Highlight Breaker Retest",    group=grpE)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECTION F — DISPLAY INPUTS
+// ══════════════════════════════════════════════════════════════════════════════
+grpF = "F — Display"
+zoneBorderWidth = input.int(1, "Zone Border Width", minval=1, maxval=3, group=grpF)
+extendZones     = input.bool(true, "Extend Active Zones Right",  group=grpF)
+labelSize       = input.string("small", "Label Size", options=["tiny","small","normal","large"], group=grpF)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SECTION G — ALERT INPUTS
+// ══════════════════════════════════════════════════════════════════════════════
+grpG = "G — Alerts"
+alertOnBOS    = input.bool(true, "Alert: BOS",       group=grpG)
+alertOnCHoCH  = input.bool(true, "Alert: CHoCH",     group=grpG)
+alertOnFVG    = input.bool(true, "Alert: New FVG",   group=grpG)
+alertOnOB     = input.bool(true, "Alert: New OB",    group=grpG)
+alertOnBB     = input.bool(true, "Alert: New BB",    group=grpG)
+alertOnIFVG   = input.bool(true, "Alert: IFVG",      group=grpG)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CORE CALCULATIONS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ATR
+atrVal = ta.atr(atrPeriod)
+
+// Displacement threshold
+avgBody = ta.sma(math.abs(close - open), 20)
+candleBody = math.abs(close - open)
+isDisplacement = switch displMode
+    "ATR×1.25"      => candleBody >= atrMult * atrVal
+    "Body×1.50 Avg" => candleBody >= bodyMult * avgBody
+    => false
+
+// Swing pivots — confirmed on bar close (non-repainting)
+swingHigh = ta.pivothigh(high, swingLength, swingLength)
+swingLow  = ta.pivotlow(low,  swingLength, swingLength)
+
+// Track last confirmed swing H/L with their bar indices
+var float lastSwingH      = na
+var int   lastSwingHBar   = na
+var float lastSwingL      = na
+var int   lastSwingLBar   = na
+var float prevSwingH      = na
+var float prevSwingL      = na
+
+// Trend state: 1=bullish, -1=bearish, 0=undefined
+var int   trendBias = 0
+
+if not na(swingHigh)
+    prevSwingH    := lastSwingH
+    lastSwingH    := swingHigh
+    lastSwingHBar := bar_index - swingLength
+
+if not na(swingLow)
+    prevSwingL    := lastSwingL
+    lastSwingL    := swingLow
+    lastSwingLBar := bar_index - swingLength
+
+// ── BOS / CHoCH detection (confirmed bar only) ──────────────────────────────
+var bool bosBull   = false
+var bool bosBear   = false
+var bool chochBull = false
+var bool chochBear = false
+
+bosBull   := false
+bosBear   := false
+chochBull := false
+chochBear := false
+
+if barstate.isconfirmed
+    // Bullish BOS: price breaks above last swing high, trend was already bullish
+    if not na(lastSwingH) and close > lastSwingH and trendBias == 1
+        bosBull := true
+
+    // Bearish BOS: price breaks below last swing low, trend was already bearish
+    if not na(lastSwingL) and close < lastSwingL and trendBias == -1
+        bosBear := true
+
+    // Bullish CHoCH: price breaks above last swing high, trend was bearish (shift)
+    if not na(lastSwingH) and close > lastSwingH and trendBias == -1
+        chochBull := true
+        trendBias := 1
+
+    // Bearish CHoCH: price breaks below last swing low, trend was bullish (shift)
+    if not na(lastSwingL) and close < lastSwingL and trendBias == 1
+        chochBear := true
+        trendBias := -1
+
+    // Initialise trend on first swing confirmation
+    if trendBias == 0
+        if not na(lastSwingH) and close > lastSwingH
+            trendBias := 1
+        if not na(lastSwingL) and close < lastSwingL
+            trendBias := -1
+
+    // Update trend on BOS
+    if bosBull
+        trendBias := 1
+    if bosBear
+        trendBias := -1
+
+// BOS / CHoCH labels
+_lblSize = switch labelSize
+    "tiny"   => size.tiny
+    "small"  => size.small
+    "normal" => size.normal
+    "large"  => size.large
+    => size.small
+
+if showBOS and bosBull
+    label.new(bar_index, high, "BOS↑", style=label.style_label_up, color=colorBOS, textcolor=color.white, size=_lblSize)
+if showBOS and bosBear
+    label.new(bar_index, low,  "BOS↓", style=label.style_label_down, color=colorBOS, textcolor=color.white, size=_lblSize)
+if showCHoCH and chochBull
+    label.new(bar_index, high, "CHoCH↑", style=label.style_label_up, color=colorCHoCH, textcolor=color.white, size=_lblSize)
+if showCHoCH and chochBear
+    label.new(bar_index, low,  "CHoCH↓", style=label.style_label_down, color=colorCHoCH, textcolor=color.white, size=_lblSize)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// FAIR VALUE GAPS (FVG)
+// ══════════════════════════════════════════════════════════════════════════════
+// 3-candle pattern: gap between candle[-2] high/low and candle[0] low/high
+// Bullish FVG: high[2] < low[0]  — gap above candle 2, below candle 0
+// Bearish FVG: low[2]  > high[0] — gap below candle 2, above candle 0
+
+// Arrays: top, bottom, left_bar, is_bull, is_active, box_id
+var array<float> fvgTop    = array.new<float>()
+var array<float> fvgBot    = array.new<float>()
+var array<int>   fvgLeft   = array.new<int>()
+var array<bool>  fvgIsBull = array.new<bool>()
+var array<bool>  fvgActive = array.new<bool>()
+var array<box>   fvgBoxes  = array.new<box>()
+
+// Detect new FVG on confirmed bar
+var bool newFVGBull = false
+var bool newFVGBear = false
+newFVGBull := false
+newFVGBear := false
+
+if barstate.isconfirmed and showFVG
+    fvgSizeBull = low  - high[2]
+    fvgSizeBear = low[2] - high
+
+    // Bullish FVG
+    if fvgSizeBull > minFvgAtr * atrVal
+        newFVGBull := true
+        topVal = low
+        botVal = high[2]
+        array.push(fvgTop,    topVal)
+        array.push(fvgBot,    botVal)
+        array.push(fvgLeft,   bar_index - 1)
+        array.push(fvgIsBull, true)
+        array.push(fvgActive, true)
+        rightEdge = extendZones ? bar_index + 50 : bar_index + 10
+        b = box.new(bar_index - 1, topVal, rightEdge, botVal,
+             border_color=colorFVGBull, bgcolor=colorFVGBull, border_width=zoneBorderWidth)
+        array.push(fvgBoxes, b)
+        // Trim to maxFVG
+        if array.size(fvgTop) > maxFVG
+            old = array.shift(fvgBoxes)
+            box.delete(old)
+            array.shift(fvgTop)
+            array.shift(fvgBot)
+            array.shift(fvgLeft)
+            array.shift(fvgIsBull)
+            array.shift(fvgActive)
+
+    // Bearish FVG
+    if fvgSizeBear > minFvgAtr * atrVal
+        newFVGBear := true
+        topVal = low[2]
+        botVal = high
+        array.push(fvgTop,    topVal)
+        array.push(fvgBot,    botVal)
+        array.push(fvgLeft,   bar_index - 1)
+        array.push(fvgIsBull, false)
+        array.push(fvgActive, true)
+        rightEdge = extendZones ? bar_index + 50 : bar_index + 10
+        b = box.new(bar_index - 1, topVal, rightEdge, botVal,
+             border_color=colorFVGBear, bgcolor=colorFVGBear, border_width=zoneBorderWidth)
+        array.push(fvgBoxes, b)
+        if array.size(fvgTop) > maxFVG
+            old = array.shift(fvgBoxes)
+            box.delete(old)
+            array.shift(fvgTop)
+            array.shift(fvgBot)
+            array.shift(fvgLeft)
+            array.shift(fvgIsBull)
+            array.shift(fvgActive)
+
+// FVG Fill / Invalidation check
+var bool ifvgCreated = false
+ifvgCreated := false
+
+if barstate.isconfirmed and array.size(fvgTop) > 0
+    for i = array.size(fvgTop) - 1 to 0
+        if array.get(fvgActive, i)
+            t   = array.get(fvgTop, i)
+            b   = array.get(fvgBot, i)
+            mid = (t + b) / 2
+            bull = array.get(fvgIsBull, i)
+            filled = switch fvgFillMode
+                "Touch" => bull ? low  <= t : high >= b
+                "50%"   => bull ? low  <= mid : high >= mid
+                "Full"  => bull ? low  <= b   : high >= t
+                => false
+            if filled
+                array.set(fvgActive, i, false)
+                // Convert to IFVG if enabled
+                if showIFVG
+                    ifvgCreated := true
+                    bx = array.get(fvgBoxes, i)
+                    box.set_bgcolor(bx, colorIFVG)
+                    box.set_border_color(bx, colorIFVG)
+                else
+                    bx = array.get(fvgBoxes, i)
+                    box.delete(bx)
+            else if extendZones
+                bx = array.get(fvgBoxes, i)
+                box.set_right(bx, bar_index + 50)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ORDER BLOCKS (OB)
+// ══════════════════════════════════════════════════════════════════════════════
+// OB = last opposing candle before a displacement that caused BOS/CHoCH
+// Bullish OB: last bearish candle before bullish displacement/BOS
+// Bearish OB: last bullish candle before bearish displacement/BOS
+
+var array<float> obTop      = array.new<float>()
+var array<float> obBot      = array.new<float>()
+var array<int>   obLeft     = array.new<int>()
+var array<bool>  obIsBull   = array.new<bool>()
+var array<bool>  obActive   = array.new<bool>()
+var array<box>   obBoxes    = array.new<box>()
+// Track which OBs have been invalidated (to convert to Breakers)
+var array<bool>  obInvalid  = array.new<bool>()
+
+var bool newOBBull = false
+var bool newOBBear = false
+newOBBull := false
+newOBBear := false
+
+// Helper: find OB candle in lookback
+// Called when displacement + structure break confirmed
+findOB(isBullish, lookback) =>
+    obIdx = -1
+    for j = 1 to lookback
+        if isBullish
+            // Last bearish candle = close < open
+            if close[j] < open[j]
+                obIdx := j
+                break
+        else
+            // Last bullish candle = close > open
+            if close[j] > open[j]
+                obIdx := j
+                break
+    obIdx
+
+addOB(isBull, obIdx, maxZones, boxes, tops, bots, lefts, isBullArr, activeArr, invalidArr) =>
+    if obIdx >= 0
+        hi = obSource == "Full Range" ? high[obIdx] : math.max(open[obIdx], close[obIdx])
+        lo = obSource == "Full Range" ? low[obIdx]  : math.min(open[obIdx], close[obIdx])
+        array.push(tops,      hi)
+        array.push(bots,      lo)
+        array.push(lefts,     bar_index - obIdx)
+        array.push(isBullArr, isBull)
+        array.push(activeArr, true)
+        array.push(invalidArr, false)
+        clr = isBull ? colorOBBull : colorOBBear
+        rightEdge = extendZones ? bar_index + 50 : bar_index + 10
+        b = box.new(bar_index - obIdx, hi, rightEdge, lo,
+             border_color=clr, bgcolor=clr, border_width=zoneBorderWidth)
+        label.new(bar_index - obIdx, hi, isBull ? "Bull OB" : "Bear OB",
+             style=label.style_label_down, color=clr, textcolor=color.white, size=_lblSize)
+        array.push(boxes, b)
+        if array.size(tops) > maxZones
+            old = array.shift(boxes)
+            box.delete(old)
+            array.shift(tops)
+            array.shift(bots)
+            array.shift(lefts)
+            array.shift(isBullArr)
+            array.shift(activeArr)
+            array.shift(invalidArr)
+
+if barstate.isconfirmed and showOB and isDisplacement
+    if bosBull or chochBull
+        idx = findOB(true, obLookback)
+        if idx >= 0
+            newOBBull := true
+            addOB(true, idx, maxOB, obBoxes, obTop, obBot, obLeft, obIsBull, obActive, obInvalid)
+
+    if bosBear or chochBear
+        idx = findOB(false, obLookback)
+        if idx >= 0
+            newOBBear := true
+            addOB(false, idx, maxOB, obBoxes, obTop, obBot, obLeft, obIsBull, obActive, obInvalid)
+
+// OB Invalidation check (price closes beyond OB)
+if barstate.isconfirmed and array.size(obTop) > 0
+    for i = array.size(obTop) - 1 to 0
+        if array.get(obActive, i)
+            t    = array.get(obTop, i)
+            b    = array.get(obBot, i)
+            bull = array.get(obIsBull, i)
+            // Bullish OB invalidated when price closes below its bottom
+            // Bearish OB invalidated when price closes above its top
+            invalid = bull ? close < b : close > t
+            if invalid
+                array.set(obActive, i, false)
+                array.set(obInvalid, i, true)
+                bx = array.get(obBoxes, i)
+                box.delete(bx)
+            else if extendZones
+                bx = array.get(obBoxes, i)
+                box.set_right(bx, bar_index + 50)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// BREAKER BLOCKS (BB)
+// ══════════════════════════════════════════════════════════════════════════════
+// An invalidated OB flips into a Breaker Block
+// Bullish OB invalidated → Bearish Breaker
+// Bearish OB invalidated → Bullish Breaker
+
+var array<float> bbTop    = array.new<float>()
+var array<float> bbBot    = array.new<float>()
+var array<int>   bbLeft   = array.new<int>()
+var array<bool>  bbIsBull = array.new<bool>()
+var array<bool>  bbActive = array.new<bool>()
+var array<box>   bbBoxes  = array.new<box>()
+
+var bool newBB = false
+newBB := false
+
+if barstate.isconfirmed and showBB and array.size(obTop) > 0
+    for i = array.size(obTop) - 1 to 0
+        // Detect freshly invalidated OBs this bar
+        if array.get(obInvalid, i) and not array.get(obActive, i)
+            // Check it's newly invalidated (not already converted)
+            alreadyAdded = false
+            lft = array.get(obLeft, i)
+            if array.size(bbLeft) > 0
+                for k = 0 to array.size(bbLeft) - 1
+                    if array.get(bbLeft, k) == lft
+                        alreadyAdded := true
+                        break
+            if not alreadyAdded
+                newBB := true
+                obBull = array.get(obIsBull, i)
+                // Flipped: bull OB → bear breaker, bear OB → bull breaker
+                bbBull = not obBull
+                t  = array.get(obTop, i)
+                b  = array.get(obBot, i)
+                clr = bbBull ? colorBBBull : colorBBBear
+                array.push(bbTop,    t)
+                array.push(bbBot,    b)
+                array.push(bbLeft,   lft)
+                array.push(bbIsBull, bbBull)
+                array.push(bbActive, true)
+                rightEdge = extendZones ? bar_index + 50 : bar_index + 10
+                bx = box.new(lft, t, rightEdge, b,
+                     border_color=clr, bgcolor=clr, border_width=zoneBorderWidth,
+                     border_style=line.style_dashed)
+                label.new(lft, bbBull ? b : t,
+                     bbBull ? "Bull Breaker" : "Bear Breaker",
+                     style=bbBull ? label.style_label_up : label.style_label_down,
+                     color=clr, textcolor=color.white, size=_lblSize)
+                array.push(bbBoxes, bx)
+                // Trim
+                if array.size(bbTop) > maxOB
+                    old = array.shift(bbBoxes)
+                    box.delete(old)
+                    array.shift(bbTop)
+                    array.shift(bbBot)
+                    array.shift(bbLeft)
+                    array.shift(bbIsBull)
+                    array.shift(bbActive)
+            // Reset flag to avoid re-processing
+            array.set(obInvalid, i, false)
+
+// Breaker Retest highlight
+var bool bbRetestBull = false
+var bool bbRetestBear = false
+bbRetestBull := false
+bbRetestBear := false
+
+if barstate.isconfirmed and showBBRetest and array.size(bbTop) > 0
+    for i = array.size(bbTop) - 1 to 0
+        if array.get(bbActive, i)
+            t    = array.get(bbTop, i)
+            b    = array.get(bbBot, i)
+            bull = array.get(bbIsBull, i)
+            inZone = close >= b and close <= t
+            if inZone
+                if bull
+                    bbRetestBull := true
+                else
+                    bbRetestBear := true
+            // Invalidate Breaker if price closes beyond it
+            if bull and close < b
+                array.set(bbActive, i, false)
+                bx = array.get(bbBoxes, i)
+                box.delete(bx)
+            else if not bull and close > t
+                array.set(bbActive, i, false)
+                bx = array.get(bbBoxes, i)
+                box.delete(bx)
+            else if extendZones
+                bx = array.get(bbBoxes, i)
+                box.set_right(bx, bar_index + 50)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PLOTS — Swing highs/lows as reference dots
+// ══════════════════════════════════════════════════════════════════════════════
+plotshape(not na(swingHigh) ? swingHigh : na, "Swing High", shape.triangledown,
+     location.abovebar, color.new(#FF5722, 40), size=size.tiny)
+plotshape(not na(swingLow)  ? swingLow  : na, "Swing Low",  shape.triangleup,
+     location.belowbar, color.new(#2196F3, 40), size=size.tiny)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ALERT CONDITIONS (10 total)
+// ══════════════════════════════════════════════════════════════════════════════
+alertcondition(alertOnBOS   and bosBull,      "BOS Bullish",          "BOS↑ — Bullish Break of Structure")
+alertcondition(alertOnBOS   and bosBear,      "BOS Bearish",          "BOS↓ — Bearish Break of Structure")
+alertcondition(alertOnCHoCH and chochBull,    "CHoCH Bullish",        "CHoCH↑ — Bullish Change of Character")
+alertcondition(alertOnCHoCH and chochBear,    "CHoCH Bearish",        "CHoCH↓ — Bearish Change of Character")
+alertcondition(alertOnFVG   and newFVGBull,   "New Bullish FVG",      "New Bullish Fair Value Gap detected")
+alertcondition(alertOnFVG   and newFVGBear,   "New Bearish FVG",      "New Bearish Fair Value Gap detected")
+alertcondition(alertOnIFVG  and ifvgCreated,  "FVG → IFVG",           "FVG filled and converted to Inverse FVG")
+alertcondition(alertOnOB    and newOBBull,    "New Bullish OB",        "New Bullish Order Block identified")
+alertcondition(alertOnOB    and newOBBear,    "New Bearish OB",        "New Bearish Order Block identified")
+alertcondition(alertOnBB    and newBB,        "New Breaker Block",     "Invalidated OB converted to Breaker Block")
