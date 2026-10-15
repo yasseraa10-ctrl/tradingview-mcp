@@ -1,0 +1,269 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0
+// © استراتيجية RSI 40-60 | EMA 21 & EMA 50 | Pine Script v6
+// Educational use only — not financial advice.
+//
+// الاستراتيجية:
+//   في الاتجاه الصاعد (EMA21 > EMA50 والسعر فوقهما)، RSI يتذبذب بين 40 و60.
+//   دخول A: ارتداد عند RSI ~40 مع تأكيد شمعة صاعدة بالقرب من EMA.
+//   دخول B: اختراق RSI فوق 60 مع شمعة قوية.
+
+//@version=6
+indicator("RSI 40-60 Strategy (EMA 21 & 50)", shorttitle="RSI 40-60",
+     overlay=true, max_labels_count=500, max_lines_count=200)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// A — EMA SETTINGS
+// ══════════════════════════════════════════════════════════════════════════════
+grpA       = "A — EMA"
+emaFastLen = input.int(21,  "EMA Fast (21)", minval=5,  group=grpA)
+emaSlowLen = input.int(50,  "EMA Slow (50)", minval=10, group=grpA)
+colorFast  = input.color(color.new(#2196F3, 0), "EMA 21 Color", group=grpA)
+colorSlow  = input.color(color.new(#FF5722, 0), "EMA 50 Color", group=grpA)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// B — RSI SETTINGS
+// ══════════════════════════════════════════════════════════════════════════════
+grpB     = "B — RSI"
+rsiLen   = input.int(14,   "RSI Length",          minval=5,  group=grpB)
+rsiSupp  = input.int(40,   "RSI Support Level",   minval=20, maxval=50, group=grpB)
+rsiBreak = input.int(60,   "RSI Breakout Level",  minval=50, maxval=80, group=grpB)
+rsiZone  = input.float(4.0,"RSI Zone Width (±)",  minval=1.0, maxval=10.0, step=0.5, group=grpB,
+           tooltip="Entry A triggers when RSI is within ±this value of the support level (default: 36–44)")
+
+// ══════════════════════════════════════════════════════════════════════════════
+// C — ENTRY SETTINGS
+// ══════════════════════════════════════════════════════════════════════════════
+grpC          = "C — Entry"
+requireNearEM = input.bool(true,  "Entry A: require price near EMA",  group=grpC)
+emaNearMult   = input.float(1.2,  "Near EMA tolerance (× ATR)",       minval=0.3, maxval=4.0, step=0.1, group=grpC)
+showShortSide = input.bool(false, "Show Downtrend Entries (short)",   group=grpC,
+               tooltip="Mirrors the strategy for downtrends: RSI resistance at 60, breakout below 40")
+showSLLevel   = input.bool(true,  "Show SL Line on Signal",           group=grpC)
+colorEntryA   = input.color(color.new(#00C853, 0), "Entry A Color (Pullback at 40)",  group=grpC)
+colorEntryB   = input.color(color.new(#FF6F00, 0), "Entry B Color (Breakout at 60)",  group=grpC)
+colorShortA   = input.color(color.new(#EF5350, 0), "Short A Color (Pullback at 60)",  group=grpC)
+colorShortB   = input.color(color.new(#AB47BC, 0), "Short B Color (Breakout at 40)",  group=grpC)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// D — ALERTS
+// ══════════════════════════════════════════════════════════════════════════════
+grpD    = "D — Alerts"
+alrtA   = input.bool(true, "Alert: Entry A (RSI 40 Pullback)", group=grpD)
+alrtB   = input.bool(true, "Alert: Entry B (RSI 60 Breakout)", group=grpD)
+alrtSA  = input.bool(true, "Alert: Short A (RSI 60 Resistance)", group=grpD)
+alrtSB  = input.bool(true, "Alert: Short B (RSI 40 Breakdown)", group=grpD)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// CALCULATIONS
+// ══════════════════════════════════════════════════════════════════════════════
+ema21  = ta.ema(close, emaFastLen)
+ema50  = ta.ema(close, emaSlowLen)
+rsiVal = ta.rsi(close, rsiLen)
+atr14  = ta.atr(14)
+
+// ── Trend filter ─────────────────────────────────────────────────────────────
+uptrend   = close > ema21 and close > ema50 and ema21 > ema50
+downtrend = close < ema21 and close < ema50 and ema21 < ema50
+
+// ── RSI zone checks ──────────────────────────────────────────────────────────
+rsiNear40   = rsiVal >= (rsiSupp  - rsiZone) and rsiVal <= (rsiSupp  + rsiZone)
+rsiNear60   = rsiVal >= (rsiBreak - rsiZone) and rsiVal <= (rsiBreak + rsiZone)
+rsiRising   = rsiVal > rsiVal[1]
+rsiFalling  = rsiVal < rsiVal[1]
+rsiCross60  = ta.crossover(rsiVal, rsiBreak)
+rsiCross40  = ta.crossunder(rsiVal, rsiSupp)
+
+// ── Price proximity to EMA ───────────────────────────────────────────────────
+nearEMA21 = math.abs(low  - ema21) <= atr14 * emaNearMult or (low  <= ema21 and high >= ema21)
+nearEMA50 = math.abs(low  - ema50) <= atr14 * emaNearMult or (low  <= ema50 and high >= ema50)
+nearEMAUp = nearEMA21 or nearEMA50
+
+nearEMA21D = math.abs(high - ema21) <= atr14 * emaNearMult or (high >= ema21 and low <= ema21)
+nearEMA50D = math.abs(high - ema50) <= atr14 * emaNearMult or (high >= ema50 and low <= ema50)
+nearEMADn  = nearEMA21D or nearEMA50D
+
+// ── Candle confirmation ───────────────────────────────────────────────────────
+bullCandle = close > open and close > close[1]
+bearCandle = close < open and close < close[1]
+
+// ── Strong breakout candle (body > avg body × 1.2) ───────────────────────────
+avgBody    = ta.sma(math.abs(close - open), 20)
+strongBull = close > open and math.abs(close - open) >= avgBody * 1.2
+strongBear = close < open and math.abs(close - open) >= avgBody * 1.2
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ENTRY CONDITIONS
+// ══════════════════════════════════════════════════════════════════════════════
+
+// ── LONG Side ────────────────────────────────────────────────────────────────
+// Entry A: RSI bounces from ~40 zone in uptrend, near EMA, bullish candle
+entryA = barstate.isconfirmed
+     and uptrend
+     and rsiNear40
+     and rsiRising
+     and bullCandle
+     and (not requireNearEM or nearEMAUp)
+
+// Entry B: RSI breaks above 60 in uptrend with momentum
+entryB = barstate.isconfirmed
+     and uptrend
+     and rsiCross60
+     and strongBull
+
+// ── SHORT Side (downtrend mirror) ────────────────────────────────────────────
+// Short A: RSI rejected at ~60 zone in downtrend, near EMA, bearish candle
+shortA = barstate.isconfirmed
+     and downtrend
+     and rsiNear60
+     and rsiFalling
+     and bearCandle
+     and (not requireNearEM or nearEMADn)
+     and showShortSide
+
+// Short B: RSI breaks below 40 in downtrend with momentum
+shortB = barstate.isconfirmed
+     and downtrend
+     and rsiCross40
+     and strongBear
+     and showShortSide
+
+// ══════════════════════════════════════════════════════════════════════════════
+// STOP LOSS LEVELS
+// Entry A SL → below EMA 50 (deeper support)
+// Entry B SL → below EMA 21 (tighter, momentum trade)
+// ══════════════════════════════════════════════════════════════════════════════
+slA = math.min(ema50, low) - atr14 * 0.15   // just below EMA50 / bar low
+slB = math.min(ema21, low) - atr14 * 0.15   // just below EMA21 / bar low
+slSA = math.max(ema50, high) + atr14 * 0.15
+slSB = math.max(ema21, high) + atr14 * 0.15
+
+// ══════════════════════════════════════════════════════════════════════════════
+// PLOTS — EMA Lines
+// ══════════════════════════════════════════════════════════════════════════════
+plot(ema21, "EMA 21", color=colorFast, linewidth=2)
+plot(ema50, "EMA 50", color=colorSlow,  linewidth=2)
+
+// ── Background: uptrend/downtrend tint ───────────────────────────────────────
+bgcolor(uptrend   ? color.new(#00C853, 96) : na, title="Uptrend Bg")
+bgcolor(downtrend and showShortSide ? color.new(#EF5350, 96) : na, title="Downtrend Bg")
+
+// ── RSI zone bar color: highlight when RSI is in signal zone ─────────────────
+// Bars turn light green when RSI ~40 (potential Entry A)
+// Bars turn light orange when RSI ~60 (potential Entry B)
+barcolor(uptrend and rsiNear40 ? color.new(#00C853, 50) : na, title="RSI 40 Zone Bar")
+barcolor(uptrend and rsiNear60 ? color.new(#FF6F00, 50) : na, title="RSI 60 Zone Bar")
+
+// ══════════════════════════════════════════════════════════════════════════════
+// SHAPES & LABELS — Entries
+// ══════════════════════════════════════════════════════════════════════════════
+// Entry A triangle
+plotshape(entryA, "Entry A ▲", shape.triangleup,
+     location.belowbar, colorEntryA, size=size.normal)
+
+// Entry B triangle (slightly larger)
+plotshape(entryB, "Entry B ▲", shape.triangleup,
+     location.belowbar, colorEntryB, size=size.large)
+
+// Short A triangle (down)
+plotshape(shortA, "Short A ▼", shape.triangledown,
+     location.abovebar, colorShortA, size=size.normal)
+
+// Short B triangle (down)
+plotshape(shortB, "Short B ▼", shape.triangledown,
+     location.abovebar, colorShortB, size=size.large)
+
+// ── Detailed labels with RSI value ───────────────────────────────────────────
+if entryA
+    label.new(bar_index, low - atr14 * 0.6,
+         "A\nRSI " + str.tostring(math.round(rsiVal, 1)),
+         style=label.style_label_up, color=colorEntryA,
+         textcolor=color.white, size=size.small)
+    if showSLLevel
+        line.new(bar_index - 2, slA, bar_index + 10, slA,
+             color=color.new(#F44336, 20), style=line.style_dashed, width=1)
+
+if entryB
+    label.new(bar_index, low - atr14 * 0.6,
+         "B\nRSI " + str.tostring(math.round(rsiVal, 1)),
+         style=label.style_label_up, color=colorEntryB,
+         textcolor=color.white, size=size.small)
+    if showSLLevel
+        line.new(bar_index - 2, slB, bar_index + 10, slB,
+             color=color.new(#F44336, 20), style=line.style_dashed, width=1)
+
+if shortA
+    label.new(bar_index, high + atr14 * 0.6,
+         "A↓\nRSI " + str.tostring(math.round(rsiVal, 1)),
+         style=label.style_label_down, color=colorShortA,
+         textcolor=color.white, size=size.small)
+    if showSLLevel
+        line.new(bar_index - 2, slSA, bar_index + 10, slSA,
+             color=color.new(#F44336, 20), style=line.style_dashed, width=1)
+
+if shortB
+    label.new(bar_index, high + atr14 * 0.6,
+         "B↓\nRSI " + str.tostring(math.round(rsiVal, 1)),
+         style=label.style_label_down, color=colorShortB,
+         textcolor=color.white, size=size.small)
+    if showSLLevel
+        line.new(bar_index - 2, slSB, bar_index + 10, slSB,
+             color=color.new(#F44336, 20), style=line.style_dashed, width=1)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// INFO TABLE — Top Right
+// ══════════════════════════════════════════════════════════════════════════════
+var table infoTable = table.new(position.top_right, 2, 5,
+     bgcolor=color.new(#0d0d1a, 5),
+     border_width=1, border_color=color.new(#444, 60),
+     frame_width=1, frame_color=color.new(#444, 60))
+
+if barstate.islast
+    // Header
+    table.cell(infoTable, 0, 0, "RSI 40-60 Strategy",
+         text_color=color.new(#FFEB3B, 0), text_size=size.small,
+         bgcolor=color.new(#1a1a3e, 0))
+    table.merge_cells(infoTable, 0, 0, 1, 0)
+
+    // RSI row
+    rsiColor = rsiVal >= (rsiBreak - rsiZone) ? colorEntryB :
+               rsiVal <= (rsiSupp + rsiZone)  ? colorEntryA :
+               color.new(#B0BEC5, 0)
+    table.cell(infoTable, 0, 1, "RSI(14)",
+         text_color=color.new(#B0BEC5, 0), text_size=size.small)
+    table.cell(infoTable, 1, 1,
+         str.tostring(math.round(rsiVal, 1)),
+         text_color=rsiColor, text_size=size.small, text_halign=text.align_right)
+
+    // EMA 21
+    table.cell(infoTable, 0, 2, "EMA 21",
+         text_color=colorFast, text_size=size.small)
+    table.cell(infoTable, 1, 2,
+         str.tostring(math.round(ema21, 2)),
+         text_color=colorFast, text_size=size.small, text_halign=text.align_right)
+
+    // EMA 50
+    table.cell(infoTable, 0, 3, "EMA 50",
+         text_color=colorSlow, text_size=size.small)
+    table.cell(infoTable, 1, 3,
+         str.tostring(math.round(ema50, 2)),
+         text_color=colorSlow, text_size=size.small, text_halign=text.align_right)
+
+    // Trend status
+    trendTxt   = uptrend ? "↑ Uptrend" : downtrend ? "↓ Downtrend" : "— Neutral"
+    trendColor = uptrend ? colorEntryA : downtrend ? colorShortA : color.new(#B0BEC5, 0)
+    table.cell(infoTable, 0, 4, "Trend",
+         text_color=color.new(#B0BEC5, 0), text_size=size.small)
+    table.cell(infoTable, 1, 4, trendTxt,
+         text_color=trendColor, text_size=size.small, text_halign=text.align_right)
+
+// ══════════════════════════════════════════════════════════════════════════════
+// ALERT CONDITIONS
+// ══════════════════════════════════════════════════════════════════════════════
+alertcondition(alrtA and entryA, "Entry A — RSI 40 Pullback",
+     "⚡ Entry A: RSI near 40 + uptrend + bullish candle near EMA")
+alertcondition(alrtB and entryB, "Entry B — RSI 60 Breakout",
+     "⚡ Entry B: RSI crossed above 60 + uptrend + strong candle")
+alertcondition(alrtSA and shortA, "Short A — RSI 60 Resistance",
+     "⚡ Short A: RSI near 60 + downtrend + bearish candle near EMA")
+alertcondition(alrtSB and shortB, "Short B — RSI 40 Breakdown",
+     "⚡ Short B: RSI crossed below 40 + downtrend + strong candle")
